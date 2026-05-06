@@ -13,8 +13,8 @@ conda activate lyra2
 export CUDA_HOME=$CONDA_PREFIX
 SITE=$CONDA_PREFIX/lib/python3.10/site-packages
 # nvtx3 ヘッダは torch wheel に同梱 (公式 INSTALL.md 不足分)
-export CPATH="$CUDA_HOME/include:$SITE/nvidia/cudnn/include:$SITE/nvidia/nccl/include:$SITE/nvidia/nvtx/include:$CPATH"
-export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$SITE/torch/lib:$SITE/nvidia/cuda_runtime/lib:$SITE/nvidia/cudnn/lib:$CUDA_HOME/lib64:$LD_LIBRARY_PATH"
+export CPATH="$CUDA_HOME/include:$SITE/nvidia/cudnn/include:$SITE/nvidia/nccl/include:$SITE/nvidia/nvtx/include${CPATH:+:$CPATH}"
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$SITE/torch/lib:$SITE/nvidia/cuda_runtime/lib:$SITE/nvidia/cudnn/lib:$CUDA_HOME/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # Lyra-2 のモジュール (lyra_2.*) を import 可能にする。インラインビルドした
 # vipe / depth_anything_3 は editable install 済みなので不要だが、Lyra-2 本体は

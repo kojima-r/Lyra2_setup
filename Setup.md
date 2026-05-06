@@ -10,7 +10,9 @@ Lyra-2/
 ├── Lyra2_setup/
 │   ├── Setup.md              # 本書
 │   ├── activate_lyra2.sh     # env 変数を source で一括投入
-│   └── sample_check.py       # 動作確認スクリプト (cwd 非依存)
+│   ├── sample_check.py       # 動作確認スクリプト (cwd 非依存)
+│   ├── run_example.sh        # example/ のデモ (image01.jpg + プロンプト) を実行
+│   └── example/              # デモ入力 (image01.jpg, demo01_01.txt, demo01_02.txt)
 ├── INSTALL.md                # 公式 (リファレンス用、本書とずれる箇所あり)
 ├── README.md                 # 公式モデル説明
 ├── assets/, checkpoints/, lyra_2/, ...
@@ -147,6 +149,13 @@ pip install --no-build-isolation -e 'lyra_2/_src/inference/depth_anything_3[gs]'
 
 # 7.4 numpy を 2.x に戻す (Lyra-2 / rerun-sdk の要件)
 pip install 'numpy>=2.0,<3'
+
+# 7.5 gdown を vipe 同梱 envs/requirements.txt のピン (5.2.0) に揃える。
+#  vipe の pyproject.toml は無印 'gdown' でしか宣言しておらず、放置すると 6.0.0 が入る。
+#  gdown 6.0 で `gdown.download(..., fuzzy=True)` の API が削除されているため、
+#  vipe_da3_gs_recon が DroidNet の droid.pth ダウンロード時に
+#  `TypeError: download() got an unexpected keyword argument 'fuzzy'` で落ちる。
+pip install 'gdown==5.2.0'
 ```
 
 > `depth-anything-3` 自体は `numpy<2` を宣言しているが、Lyra-2 ランタイムでの軽い検証では `numpy 2.2.6` で問題は出ていない。問題が出たら `numpy<2` に戻すこと。
@@ -289,6 +298,68 @@ python -m lyra_2._src.inference.vipe_da3_gs_recon \
   --input_video_path outputs/zoomgs/videos/4.mp4
 ```
 
+## 11.1 example/ のデモ実行 (`run_example.sh`)
+
+`Lyra2_setup/example/` には 1 枚の参照画像 `image01.jpg` と、それに対する 2 種類のプロンプト
+`demo01_01.txt` / `demo01_02.txt` が同梱されている。`run_example.sh` はこれらを
+`lyra2_zoomgs_inference` に流し、必要なら 3D 再構成 (`vipe_da3_gs_recon`) まで一括で行う。
+
+`lyra2_zoomgs_inference` は **画像とキャプションをファイル名 (basename) で対応づける** 仕様
+(`<image_stem>.txt` を読みに行く) のため、本スクリプトはプロンプトごとに作業ディレクトリを切り、
+`image01.jpg` を `<prompt_stem>.jpg` として symlink してから推論を起動する。
+
+### 前提
+
+- `source activate_lyra2.sh` 相当を内部で行うので、別途 source は不要。
+- `$LYRA2_ROOT/checkpoints/` 一式がダウンロード済みであること (§9)。
+- 14B Wan モデル本体が GPU に載る VRAM が必要。本リポジトリでは **H200 NVL (140 GB)** ホストで
+  動作確認済み。RTX A6000 (48 GB) ではモデルロード時点で OOM する (§1, §12 参照)。
+
+### 使い方
+
+```bash
+# 全プロンプト (demo01_01, demo01_02) を順に実行
+bash $LYRA2_ROOT/Lyra2_setup/run_example.sh
+
+# 片方のプロンプトだけ実行
+bash $LYRA2_ROOT/Lyra2_setup/run_example.sh demo01_01
+
+# 共用 GPU で番号を指定して実行 (空きを `nvidia-smi` で確認してから)
+CUDA_VISIBLE_DEVICES=1 bash $LYRA2_ROOT/Lyra2_setup/run_example.sh
+
+# 動画生成後にそのまま 3D Gaussian Splatting 再構成まで走らせる
+RUN_RECON=1 bash $LYRA2_ROOT/Lyra2_setup/run_example.sh
+```
+
+### 出力レイアウト
+
+```
+$LYRA2_ROOT/outputs/example_demo/
+├── _inputs/
+│   ├── demo01_01/{demo01_01.jpg, demo01_01.txt}   # symlink (lyra2_zoomgs_inference 用ステージング)
+│   └── demo01_02/{demo01_02.jpg, demo01_02.txt}
+├── demo01_01/
+│   ├── videos/demo01_01.mp4         # zoom-out (反転) + zoom-in を結合した最終動画
+│   └── demo01_01/{zoom_in.mp4, zoom_out.mp4, combined.mp4}
+└── demo01_02/
+    └── (同上)
+```
+
+`RUN_RECON=1` を指定した場合は、`vipe_da3_gs_recon` が生成した 3DGS 出力 (PLY / ckpt 等) が
+推論側のデフォルト出力ディレクトリ配下に追加される。
+
+### 主な実行パラメタ (スクリプト内ハードコード)
+
+| 項目 | 値 |
+|---|---|
+| `--experiment` | `lyra2` |
+| `--checkpoint_dir` | `checkpoints/model` |
+| `--num_frames_zoom_in` / `--num_frames_zoom_out` | `81` / `241` |
+| `--zoom_in_strength` / `--zoom_out_strength` | `0.5` / `1.5` |
+| `--use_dmd` | 有効 (4-step DMD 蒸留 LoRA で高速化) |
+
+軌道や強度などを変えたい場合は `run_example.sh` 内の `python -m ...` 呼び出しを直接編集する。
+
 ## 12. トラブルシューティング
 
 | 症状 | 原因 / 対処 |
@@ -306,6 +377,7 @@ python -m lyra_2._src.inference.vipe_da3_gs_recon \
 | `pytest` 起動で `iniconfig` / `execnet` 不足 | 同上。テスト実行を行うなら `pip install iniconfig execnet` |
 | `pip check` で `decord 0.6.0 is not supported on this platform` | `import decord` 自体は通り `__version__ == 0.6.0`。pip の platform tag 警告で実害なし、無視してよい |
 | `pip check` で megatron-core が `flask-restful / nltk / nvidia-modelopt / wandb` 不足 | これらは学習側依存。Lyra-2 の inference では未使用なので無視可 |
+| `vipe_da3_gs_recon` が `TypeError: download() got an unexpected keyword argument 'fuzzy'` | gdown 6.0 で API が変更されたため。§7.5 の `pip install 'gdown==5.2.0'` に下げる |
 
 ## 13. クイックリファレンス
 
@@ -315,6 +387,10 @@ source /home/kojima/Lyra/lyra/Lyra-2/Lyra2_setup/activate_lyra2.sh
 
 # 動作確認
 python "$LYRA2_ROOT/Lyra2_setup/sample_check.py"
+
+# example/ のデモを一括実行 (要 ~80GB VRAM)
+bash "$LYRA2_ROOT/Lyra2_setup/run_example.sh"
+RUN_RECON=1 bash "$LYRA2_ROOT/Lyra2_setup/run_example.sh"   # 3D 再構成まで
 
 # ヘルプ
 python -m lyra_2._src.inference.lyra2_zoomgs_inference --help
