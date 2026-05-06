@@ -360,6 +360,83 @@ $LYRA2_ROOT/outputs/example_demo/
 
 軌道や強度などを変えたい場合は `run_example.sh` 内の `python -m ...` 呼び出しを直接編集する。
 
+## 11.2 任意の軌道で動かす (`run_custom_traj_example.sh`)
+
+`Lyra2_setup/example_custom_traj/` には `run_example.sh` の zoom-in / zoom-out
+プリセットの代わりに、`lyra2_custom_traj_inference` を経由して `.npz` 軌道ファイルを
+直接食わせるためのデモが入っている。`run_custom_traj_example.sh` は
+1) `make_trajectory.py` で軌道 `.npz` を生成し、
+2) `lyra2_custom_traj_inference` を回し、
+3) 必要なら `vipe_da3_gs_recon` で 3DGS 再構成まで行う。
+
+### 同梱しているデモ
+
+| ステム | 軌道 | 説明 |
+|---|---|---|
+| `orbit_horizontal_demo` | `orbit_horizontal` (既存) | 中心方向を見続けながら水平方向に弧を描く軌道 (内向き周回) |
+| `orbit_outward_demo` | `orbit_outward` (本リポジトリで追加) | 円周上を移動しながら、各カメラが半径方向 **外側** を向く軌道 (パノラマ風) |
+
+`orbit_outward` は `make_trajectory.py` 内に実装した独自軌道。frame 0 を world 原点・前方 +Z に
+合わせるため、orbit 中心を `(0, 0, -outward_radius)` に置き、各 frame で
+`camera_pos = orbit_center + r * (sinθ, 0, cosθ)` / `forward = (sinθ, 0, cosθ)` (axis=`y` の場合) と
+する。`outward_axis=x` を指定すると鉛直方向の周回 (Y-Z 平面) に切り替わる。
+
+### 使い方
+
+```bash
+# 既定: orbit_horizontal_demo と orbit_outward_demo の両方を実行
+bash $LYRA2_ROOT/Lyra2_setup/run_custom_traj_example.sh
+
+# 片方だけ
+bash $LYRA2_ROOT/Lyra2_setup/run_custom_traj_example.sh orbit_outward_demo
+
+# 推論後に 3DGS 再構成も実行
+RUN_RECON=1 bash $LYRA2_ROOT/Lyra2_setup/run_custom_traj_example.sh
+
+# GPU 指定 (空きを `nvidia-smi` で確認してから)
+CUDA_VISIBLE_DEVICES=1 bash $LYRA2_ROOT/Lyra2_setup/run_custom_traj_example.sh
+```
+
+### 出力レイアウト
+
+```
+$LYRA2_ROOT/outputs/example_custom_traj/
+├── _inputs/<stem>/{<stem>.jpg, <stem>.txt}              # symlink
+├── _trajectories/<stem>/<stem>.npz                      # make_trajectory.py の出力
+├── orbit_horizontal_demo/
+│   ├── orbit_horizontal_demo.mp4                        # 推論動画
+│   └── orbit_horizontal_demo_gs_ours/                   # RUN_RECON=1 のとき
+│       ├── reconstructed_scene.ply
+│       ├── gs_trajectory.mp4
+│       └── cameras.npz / vipe_predictions.npz / .done
+└── orbit_outward_demo/
+    └── (同上)
+```
+
+### 自分で軌道を足したいとき
+
+`make_trajectory.py` は `lyra_2._src.inference.camera_traj_utils.CAMERA_TRAJECTORY_CHOICES`
+にある 27 種の軌道 (spiral, horizontal_zoom, dolly_zoom, orbit_vertical, ...) と、
+追加した `orbit_outward` を `--trajectory` で受け付ける。例:
+
+```bash
+# 単発で軌道 .npz だけ生成 (動画推論は走らせない)
+source $LYRA2_ROOT/Lyra2_setup/activate_lyra2.sh
+python $LYRA2_ROOT/Lyra2_setup/example_custom_traj/make_trajectory.py \
+    --output_path /tmp/spiral.npz \
+    --num_frames 161 --image_height 480 --image_width 832 \
+    --trajectory spiral --strength 0.5 --direction right --center_depth 2.0
+
+python $LYRA2_ROOT/Lyra2_setup/example_custom_traj/make_trajectory.py \
+    --output_path /tmp/outward_180.npz \
+    --num_frames 161 --image_height 480 --image_width 832 \
+    --trajectory orbit_outward --outward_radius 0.5 --outward_angle_deg 180 --direction right
+```
+
+新しい (stem, 軌道) ペアを `run_custom_traj_example.sh` で扱いたい場合は、
+スクリプト先頭の `DEMO_TRAJ_KIND` / `DEMO_TRAJ_ARGS` に追記し、
+`Lyra2_setup/example_custom_traj/<stem>.txt` にプロンプトを置く。
+
 ## 12. トラブルシューティング
 
 | 症状 | 原因 / 対処 |
@@ -391,6 +468,10 @@ python "$LYRA2_ROOT/Lyra2_setup/sample_check.py"
 # example/ のデモを一括実行 (要 ~80GB VRAM)
 bash "$LYRA2_ROOT/Lyra2_setup/run_example.sh"
 RUN_RECON=1 bash "$LYRA2_ROOT/Lyra2_setup/run_example.sh"   # 3D 再構成まで
+
+# 任意の軌道 (.npz) で動かすデモ (orbit_horizontal / orbit_outward)
+bash "$LYRA2_ROOT/Lyra2_setup/run_custom_traj_example.sh"
+RUN_RECON=1 bash "$LYRA2_ROOT/Lyra2_setup/run_custom_traj_example.sh"
 
 # ヘルプ
 python -m lyra_2._src.inference.lyra2_zoomgs_inference --help
